@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wendover Temperature Alert Dashboard</title>
+
+<style>
+body{
+    margin:0;
+    padding:20px;
+    font-family:Arial, Helvetica, sans-serif;
+    background:#111;
+    color:white;
+}
+
+.container{
+    max-width:900px;
+    margin:auto;
+}
+
+.header{
+    text-align:center;
+    margin-bottom:20px;
+}
+
+.card{
+    background:#1e1e1e;
+    padding:20px;
+    border-radius:12px;
+    margin-bottom:20px;
+    box-shadow:0 0 10px rgba(0,0,0,.3);
+}
+
+.zone-box{
+    text-align:center;
+    padding:40px;
+    border-radius:12px;
+    font-size:48px;
+    font-weight:bold;
+    transition:.3s;
+}
+
+.green{
+    background:#00aa00;
+}
+
+.yellow{
+    background:#d8a400;
+    color:black;
+}
+
+.red{
+    background:#cc0000;
+}
+
+.black{
+    background:#000000;
+    border:2px solid white;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:15px;
+}
+
+.metric{
+    background:#2a2a2a;
+    padding:15px;
+    border-radius:10px;
+}
+
+.metric-title{
+    font-size:14px;
+    color:#bbb;
+}
+
+.metric-value{
+    font-size:28px;
+    font-weight:bold;
+    margin-top:8px;
+}
+
+.footer{
+    text-align:center;
+    color:#888;
+    margin-top:20px;
+}
+
+.status{
+    font-size:18px;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+    <div class="header">
+        <h1>🌡️ Wendover Temperature Alert Dashboard</h1>
+        <p>Realtime Firebase Monitoring</p>
+    </div>
+
+    <div class="card">
+        <div id="zoneBox" class="zone-box">
+            Loading...
+        </div>
+    </div>
+
+    <div class="grid">
+
+        <div class="metric">
+            <div class="metric-title">Temperature</div>
+            <div id="temp" class="metric-value">--</div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-title">Condition</div>
+            <div id="condition" class="metric-value">--</div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-title">Wind</div>
+            <div id="wind" class="metric-value">--</div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-title">Last Update</div>
+            <div id="updated" class="metric-value" style="font-size:18px;">--</div>
+        </div>
+
+    </div>
+
+    <div class="card">
+        <h2>Last Alert</h2>
+        <div id="lastAlert" class="status">
+            No alert data available.
+        </div>
+    </div>
+
+</div>
+
+<div class="footer">
+    Connected to Firebase Realtime Database
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+
+import {
+    getDatabase,
+    ref,
+    onValue
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+/* Firebase Config */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDHNSLZCrKxke56qwvz6cb05IsMGT84iA0",
+  authDomain: "temperature-alerting.firebaseapp.com",
+  databaseURL: "https://temperature-alerting-default-rtdb.firebaseio.com",
+  projectId: "temperature-alerting",
+  storageBucket: "temperature-alerting.firebasestorage.app",
+  messagingSenderId: "174622663621",
+  appId: "1:174622663621:web:9c05ea526114e0c53561ac",
+  measurementId: "G-83E6HMNJJ9"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+/* Zone Colors */
+
+function setZone(zone){
+
+    const box = document.getElementById("zoneBox");
+
+    box.className = "zone-box";
+
+    switch(zone){
+
+        case "GREEN":
+            box.classList.add("green");
+            break;
+
+        case "YELLOW":
+            box.classList.add("yellow");
+            break;
+
+        case "RED":
+            box.classList.add("red");
+            break;
+
+        case "BLACK":
+            box.classList.add("black");
+            break;
+    }
+
+    box.textContent = zone;
+}
+
+/* Status Listener */
+
+onValue(ref(db,"status"), (snapshot)=>{
+
+    const data = snapshot.val();
+
+    if(!data) return;
+
+    if(data.zone){
+        setZone(data.zone);
+    }
+
+});
+
+/* Weather Listener */
+
+onValue(ref(db,"weather"), (snapshot)=>{
+
+    const data = snapshot.val();
+
+    if(!data) return;
+
+    document.getElementById("temp").textContent =
+        data.temperature + "°F";
+
+    document.getElementById("condition").textContent =
+        data.condition || "--";
+
+    document.getElementById("wind").textContent =
+        data.windSpeed || "--";
+
+    document.getElementById("updated").textContent =
+        data.updated || "--";
+
+});
+
+/* Last Alert Listener */
+
+onValue(ref(db,"history"), (snapshot)=>{
+
+    const data = snapshot.val();
+
+    if(!data){
+        return;
+    }
+
+    const keys = Object.keys(data);
+
+    if(keys.length === 0){
+        return;
+    }
+
+    const latest = data[keys[keys.length - 1]];
+
+    document.getElementById("lastAlert").innerHTML =
+        `
+        <strong>${latest.oldZone || "UNKNOWN"}</strong>
+        →
+        <strong>${latest.newZone || "UNKNOWN"}</strong>
+        <br><br>
+        Temperature:
+        ${latest.temperature ?? "--"}°F
+        <br><br>
+        Time:
+        ${latest.timestamp ?
+            new Date(latest.timestamp).toLocaleString()
+            : "--"}
+        `;
+});
+
+</script>
+
+</body>
+</html>
