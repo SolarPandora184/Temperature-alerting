@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Wendover Weather Alert System</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Wendover Weather Risk Dashboard</title>
 
 <style>
 body {
@@ -17,12 +18,12 @@ h1 {
     margin-bottom: 10px;
 }
 
-#zone {
+.zone {
     font-size: 60px;
-    padding: 30px;
+    padding: 25px;
     border-radius: 12px;
+    width: 250px;
     margin: 20px auto;
-    width: 300px;
 }
 
 .GREEN { background: green; }
@@ -34,7 +35,150 @@ h1 {
     background: #222;
     padding: 10px;
     margin: 10px auto;
-    width: 300px;
+    width: 320px;
+    border-radius: 10px;
+}
+
+.small {
+    font-size: 14px;
+    color: #aaa;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🌡 Wendover Weather Risk Dashboard</h1>
+
+<div id="zone" class="zone">LOADING...</div>
+
+<div class="card" id="temp">Temperature: --</div>
+<div class="card" id="wind">Wind: --</div>
+<div class="card" id="humidity">Humidity: --</div>
+<div class="card" id="condition">Condition: --</div>
+<div class="card small" id="updated">Last Update: --</div>
+
+<div class="card">
+<strong>Risk Value:</strong> <span id="risk">--</span>
+</div>
+
+<script>
+const LAT = 40.739;
+const LON = -114.073;
+
+let lastZone = null;
+
+/* -------------------------
+   WEATHER FUNCTIONS
+--------------------------*/
+
+function heatIndex(T, RH) {
+    return (
+        -42.379 +
+        2.04901523 * T +
+        10.14333127 * RH -
+        0.22475541 * T * RH -
+        0.00683783 * T * T -
+        0.05481717 * RH * RH +
+        0.00122874 * T * T * RH +
+        0.00085282 * T * RH * RH -
+        0.00000199 * T * T * RH * RH
+    );
+}
+
+function windChill(T, W) {
+    return (
+        35.74 +
+        0.6215 * T -
+        35.75 * Math.pow(W, 0.16) +
+        0.4275 * T * Math.pow(W, 0.16)
+    );
+}
+
+function getZone(v) {
+    if (v <= 80) return "GREEN";
+    if (v <= 94) return "YELLOW";
+    if (v <= 105) return "RED";
+    return "BLACK";
+}
+
+/* -------------------------
+   MAIN FETCH LOOP
+--------------------------*/
+
+async function updateWeather() {
+    try {
+        const point = await fetch(`https://api.weather.gov/points/${LAT},${LON}`);
+        const pointData = await point.json();
+
+        const forecastURL = pointData.properties.forecastHourly;
+
+        const forecast = await fetch(forecastURL);
+        const data = await forecast.json();
+
+        const current = data.properties.periods[0];
+
+        /* REAL VALUES ONLY */
+        const temp = current.temperature;
+        const wind = parseFloat(current.windSpeed) || 0;
+        const condition = current.shortForecast;
+
+        // NWS humidity is often missing in hourly, so fallback safe
+        const humidity = current.relativeHumidity?.value ?? null;
+
+        /* DERIVED VALUES */
+        let heat = null;
+        let chill = null;
+
+        if (temp >= 80 && humidity !== null) {
+            heat = heatIndex(temp, humidity);
+        }
+
+        if (temp <= 50 && wind >= 3) {
+            chill = windChill(temp, wind);
+        }
+
+        /* RISK ENGINE */
+        let risk = temp;
+
+        if (heat !== null) risk = Math.max(risk, heat);
+        if (chill !== null) risk = Math.min(risk, chill);
+
+        const zone = getZone(risk);
+
+        /* UI UPDATE */
+        document.getElementById("temp").innerText = "Temperature: " + temp + "°F";
+        document.getElementById("wind").innerText = "Wind: " + wind + " mph";
+        document.getElementById("humidity").innerText = "Humidity: " + (humidity ?? "N/A") + "%";
+        document.getElementById("condition").innerText = "Condition: " + condition;
+        document.getElementById("risk").innerText = risk.toFixed(1);
+        document.getElementById("updated").innerText = "Updated: " + new Date().toLocaleTimeString();
+
+        const zoneBox = document.getElementById("zone");
+        zoneBox.innerText = zone;
+        zoneBox.className = "zone " + zone;
+
+        /* ALERT ON CHANGE */
+        if (lastZone && lastZone !== zone) {
+            alert(`ZONE CHANGE: ${lastZone} → ${zone}`);
+            console.log("ZONE CHANGE:", lastZone, "→", zone);
+        }
+
+        lastZone = zone;
+
+    } catch (err) {
+        console.error("Weather error:", err);
+    }
+}
+
+/* START */
+updateWeather();
+setInterval(updateWeather, 10 * 60 * 1000);
+
+</script>
+
+</body>
+</html>    width: 300px;
     border-radius: 10px;
 }
 </style>
