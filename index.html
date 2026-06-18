@@ -2,39 +2,136 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wendover Temperature Alert Dashboard</title>
+<title>Wendover Weather Alert System</title>
 
 <style>
-body{
-    margin:0;
-    padding:20px;
-    font-family:Arial, Helvetica, sans-serif;
-    background:#111;
-    color:white;
+body {
+    font-family: Arial;
+    background: #111;
+    color: white;
+    text-align: center;
+    padding: 20px;
 }
 
-.container{
-    max-width:900px;
-    margin:auto;
+h1 {
+    margin-bottom: 10px;
 }
 
-.header{
-    text-align:center;
-    margin-bottom:20px;
+#zone {
+    font-size: 60px;
+    padding: 30px;
+    border-radius: 12px;
+    margin: 20px auto;
+    width: 300px;
 }
 
-.card{
-    background:#1e1e1e;
-    padding:20px;
-    border-radius:12px;
-    margin-bottom:20px;
-    box-shadow:0 0 10px rgba(0,0,0,.3);
+.GREEN { background: green; }
+.YELLOW { background: gold; color: black; }
+.RED { background: red; }
+.BLACK { background: black; border: 2px solid white; }
+
+.card {
+    background: #222;
+    padding: 10px;
+    margin: 10px auto;
+    width: 300px;
+    border-radius: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🌡 Wendover Weather Monitor</h1>
+
+<div id="zone">Loading...</div>
+
+<div class="card" id="temp">Temp: --</div>
+<div class="card" id="wind">Wind: --</div>
+<div class="card" id="condition">Condition: --</div>
+<div class="card" id="updated">Last Update: --</div>
+
+<script>
+const LAT = 40.739;
+const LON = -114.073;
+
+let lastZone = null;
+
+function getZone(temp) {
+    if (temp <= 80) return "GREEN";
+    if (temp <= 94) return "YELLOW";
+    if (temp <= 105) return "RED";
+    return "BLACK";
 }
 
-.zone-box{
-    text-align:center;
-    padding:40px;
+async function fetchWeather() {
+    try {
+        const point = await fetch(`https://api.weather.gov/points/${LAT},${LON}`);
+        const pointData = await point.json();
+
+        const forecastURL = pointData.properties.forecastHourly;
+
+        const forecast = await fetch(forecastURL);
+        const data = await forecast.json();
+
+        const now = data.properties.periods[0];
+
+        const temp = now.temperature;
+        const wind = now.windSpeed;
+        const condition = now.shortForecast;
+
+        const zone = getZone(temp);
+
+        // UI update
+        document.getElementById("temp").innerText = "Temp: " + temp + "°F";
+        document.getElementById("wind").innerText = "Wind: " + wind;
+        document.getElementById("condition").innerText = "Condition: " + condition;
+        document.getElementById("updated").innerText = "Updated: " + new Date().toLocaleTimeString();
+
+        const zoneBox = document.getElementById("zone");
+        zoneBox.innerText = zone;
+        zoneBox.className = zone;
+
+        // Zone change detection
+        if (lastZone && lastZone !== zone) {
+
+            const msg = `ZONE CHANGE: ${lastZone} → ${zone}`;
+
+            alert(msg);
+
+            // Browser notification
+            if (Notification.permission === "granted") {
+                new Notification("Wendover Weather Alert", {
+                    body: msg + ` (${temp}°F)`
+                });
+            }
+
+            console.log(msg);
+        }
+
+        lastZone = zone;
+
+    } catch (err) {
+        console.error("Weather error:", err);
+    }
+}
+
+// Ask for notifications
+if (Notification.permission !== "granted") {
+    Notification.requestPermission();
+}
+
+// Run immediately
+fetchWeather();
+
+// Update every 10 minutes
+setInterval(fetchWeather, 10 * 60 * 1000);
+
+console.log("Weather monitor running...");
+</script>
+
+</body>
+</html>    padding:40px;
     border-radius:12px;
     font-size:48px;
     font-weight:bold;
