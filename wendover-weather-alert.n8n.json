@@ -3,8 +3,8 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Setup checklist\n1. Open **Config** below and set:\n   - `firebaseBaseUrl` \u2192 your Firebase Realtime Database URL (e.g. `https://your-project-default-rtdb.firebaseio.com`)\n   - `firebaseAuth` \u2192 your DB secret / auth token (leave \"\" only if your write rules are public \u2014 not recommended)\n   - `resendApiKey` \u2192 your Resend API key\n   - `fromEmail` \u2192 a sender address verified in Resend\n2. Recipients are already set to Kendrick.uhles@cawgcadets.org and Maverick.mcnealy@utwg.cap.gov \u2014 edit in **Config** if needed.\n3. Activate the workflow. It polls every 10 minutes.\n4. First run only initializes `status/zone` in Firebase \u2014 no email is sent until a *second* run detects an actual zone change.",
-        "height": 380,
+        "content": "## Setup checklist\n1. Open **Config** below and set:\n   - `firebaseBaseUrl` \u2192 your Firebase Realtime Database URL (already set to your project)\n   - `firebaseAuth` \u2192 your DB secret / auth token (leave \"\" only if your write rules are public \u2014 not recommended)\n   - `fromEmail` \u2192 your iCloud address, e.g. `yourname@icloud.com`\n2. Recipients are already set to Kendrick.uhles@cawgcadets.org and Maverick.mcnealy@utwg.cap.gov \u2014 edit in **Config** if needed.\n3. Create an SMTP credential named **iCloud SMTP** (Credentials \u2192 Add Credential \u2192 SMTP):\n   - Host: `smtp.mail.me.com`\n   - Port: `587`\n   - SSL/TLS: STARTTLS (not SSL)\n   - User: your full iCloud address\n   - Password: an **app-specific password** from appleid.apple.com \u2192 Sign-In and Security \u2192 App-Specific Passwords (requires 2FA on your Apple ID)\n4. Open the **Send Zone Change Email** node and attach the iCloud SMTP credential you just created.\n5. Activate the workflow. It polls every 10 minutes.\n6. First run only initializes `status/zone` in Firebase \u2014 no email is sent until a *second* run detects an actual zone change.",
+        "height": 460,
         "width": 380
       },
       "id": "a1111111-0000-4000-8000-000000000001",
@@ -62,7 +62,7 @@
               "id": "c4",
               "name": "firebaseBaseUrl",
               "type": "string",
-              "value": "https://REPLACE-WITH-YOUR-PROJECT-default-rtdb.firebaseio.com"
+              "value": "https://temperature-alerting-default-rtdb.firebaseio.com"
             },
             {
               "id": "c5",
@@ -71,16 +71,10 @@
               "value": "REPLACE-WITH-FIREBASE-DB-SECRET-OR-LEAVE-BLANK"
             },
             {
-              "id": "c6",
-              "name": "resendApiKey",
-              "type": "string",
-              "value": "REPLACE-WITH-RESEND-API-KEY"
-            },
-            {
               "id": "c7",
               "name": "fromEmail",
               "type": "string",
-              "value": "alerts@yourdomain.org"
+              "value": "REPLACE-WITH-YOUR-ICLOUD-ADDRESS@icloud.com"
             },
             {
               "id": "c8",
@@ -223,34 +217,27 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.resend.com/emails",
-        "authentication": "none",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$json.resendApiKey}}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ from: $json.fromEmail, to: [$json.recipient1, $json.recipient2], subject: \"Wendover Weather Alert: \" + $json.previousZone + \" -> \" + $json.zone, html: \"<h2>Wendover Weather Zone Change</h2><p><b>\" + $json.previousZone + \" &rarr; \" + $json.zone + \"</b></p><ul>\" + \"<li>Risk Value (Feels Like): \" + $json.riskValue + \"&deg;F</li>\" + \"<li>Actual Temperature: \" + $json.temperature + \"&deg;F</li>\" + \"<li>Heat Index: \" + (($json.heatIndex !== null && $json.heatIndex !== undefined) ? $json.heatIndex + \"&deg;F\" : \"n/a\") + \"</li>\" + \"<li>Wind Chill: \" + (($json.windChill !== null && $json.windChill !== undefined) ? $json.windChill + \"&deg;F\" : \"n/a\") + \"</li>\" + \"<li>Humidity: \" + ($json.humidity ?? \"n/a\") + \"%</li>\" + \"<li>Wind Speed: \" + $json.wind + \" mph</li>\" + \"<li>Condition: \" + $json.condition + \"</li>\" + \"<li>UV Index: \" + $json.uv + \" (\" + $json.uvCategory + \")</li>\" + \"<li>Updated: \" + $json.updated + \"</li>\" + \"</ul><p>Wendover Weather Alert System</p>\" }) }}"
+        "fromEmail": "={{$json.fromEmail}}",
+        "toEmail": "={{$json.recipient1}},{{$json.recipient2}}",
+        "subject": "=Wendover Weather Alert: {{$json.previousZone}} -> {{$json.zone}}",
+        "emailFormat": "html",
+        "html": "=<h2>Wendover Weather Zone Change</h2><p><b>{{$json.previousZone}} &rarr; {{$json.zone}}</b></p><ul><li>Risk Value (Feels Like): {{$json.riskValue}}\u00b0F</li><li>Actual Temperature: {{$json.temperature}}\u00b0F</li><li>Heat Index: {{$json.heatIndex !== null && $json.heatIndex !== undefined ? $json.heatIndex + '\u00b0F' : 'n/a'}}</li><li>Wind Chill: {{$json.windChill !== null && $json.windChill !== undefined ? $json.windChill + '\u00b0F' : 'n/a'}}</li><li>Humidity: {{$json.humidity ?? 'n/a'}}%</li><li>Wind Speed: {{$json.wind}} mph</li><li>Condition: {{$json.condition}}</li><li>UV Index: {{$json.uv}} ({{$json.uvCategory}})</li><li>Updated: {{$json.updated}}</li></ul><p>Wendover Weather Alert System</p>",
+        "options": {}
       },
       "id": "a1111111-0000-4000-8000-000000000010",
       "name": "Send Zone Change Email",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
       "position": [
         1740,
         -140
-      ]
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_AFTER_CREATING_CREDENTIAL",
+          "name": "iCloud SMTP"
+        }
+      }
     },
     {
       "parameters": {
