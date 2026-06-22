@@ -731,7 +731,7 @@
     const isStale = updated && (Date.now() - new Date(updated).getTime() > CONFIG.staleAfterMs);
     els.staleBanner.classList.toggle('show', !!isStale);
 
-    lastWeather = { temperature: weather && weather.temperature, zone: zone };
+   lastWeather = { temperature: weather && weather.feelsLike, zone: zone };
     renderScript(lastWeather);
   }
 
