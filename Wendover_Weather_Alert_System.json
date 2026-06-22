@@ -1,0 +1,934 @@
+{
+  "name": "Wendover Weather Alert System",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup checklist\n1. Open **Config** below and set:\n   - `firebaseBaseUrl` \u2192 your Firebase Realtime Database URL (already set to your project)\n   - `firebaseAuth` \u2192 your DB secret / auth token (leave \"\" only if your write rules are public \u2014 not recommended)\n   - `fromEmail` \u2192 your iCloud address, e.g. `yourname@icloud.com`\n2. Recipients are already set to Kendrick.uhles@cawgcadets.org and Maverick.mcnealy@utwg.cap.gov \u2014 edit in **Config** if needed.\n3. Create an SMTP credential named **iCloud SMTP** (Credentials \u2192 Add Credential \u2192 SMTP):\n   - Host: `smtp.mail.me.com`\n   - Port: `587`\n   - SSL/TLS: STARTTLS (not SSL)\n   - User: your full iCloud address\n   - Password: an **app-specific password** from appleid.apple.com \u2192 Sign-In and Security \u2192 App-Specific Passwords (requires 2FA on your Apple ID)\n4. Open the **Send Zone Change Email** node and attach the iCloud SMTP credential you just created.\n5. Activate the workflow. It polls every 10 minutes.\n6. Quiet hours: 21:00-05:00 (no alerts sent, but stored as pending). When quiet hours end, a status update email is sent if there was a pending alert.",
+        "height": 700,
+        "width": 1468
+      },
+      "id": "217641f9-b7f8-4792-9c98-08359a824b62",
+      "name": "Setup Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 45
+            }
+          ]
+        }
+      },
+      "id": "f7b4aa33-43b3-4ada-bdc2-fcbaba738c6f",
+      "name": "Schedule Trigger (every 10 min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -112,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "lat",
+              "type": "number",
+              "value": 40.7186
+            },
+            {
+              "id": "c2",
+              "name": "lon",
+              "type": "number",
+              "value": -114.0308
+            },
+            {
+              "id": "c3",
+              "name": "stationId",
+              "type": "string",
+              "value": "KENV"
+            },
+            {
+              "id": "c4",
+              "name": "firebaseBaseUrl",
+              "type": "string",
+              "value": "https://temperature-alerting-default-rtdb.firebaseio.com"
+            },
+            {
+              "id": "c5",
+              "name": "firebaseAuth",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "c7",
+              "name": "fromEmail",
+              "type": "string",
+              "value": "Noelleuhl@icloud.com"
+            },
+            {
+              "id": "c8",
+              "name": "recipient1",
+              "type": "string",
+              "value": "Kendrick.uhles@cawgcadets.org"
+            },
+            {
+              "id": "c9",
+              "name": "recipient2",
+              "type": "string",
+              "value": "kaminskiskyler@icloud.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4ab897fc-7d70-4c35-a0be-f5836804bb7b",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.weather.gov/stations/{{$json.stationId}}/observations/latest",
+        "options": {}
+      },
+      "id": "6a7d7312-23a5-46f3-a87a-714d6653e3be",
+      "name": "Get NOAA Observation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        336,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull in the NOAA observation and the shared Config values.\nconst obsRaw = $('Get NOAA Observation').first().json;\nconst config = $('Config').first().json;\n\n// Parse the NOAA response - it comes as a string in the \"data\" field\nlet obsRoot;\ntry {\n  obsRoot = typeof obsRaw.data === 'string' ? JSON.parse(obsRaw.data) : obsRaw.data;\n} catch (e) {\n  obsRoot = obsRaw;\n}\n\nconst obs = (obsRoot && obsRoot.properties) ? obsRoot.properties : {};\n\n// ---- Raw NOAA readings (do not alter) ----\nconst tempC = (obs.temperature && obs.temperature.value != null) ? obs.temperature.value : null;\nconst tempF = tempC !== null ? (tempC * 9 / 5 + 32) : null;\n\nconst rh = (obs.relativeHumidity && obs.relativeHumidity.value != null) ? obs.relativeHumidity.value : null;\n\nconst windKmh = (obs.windSpeed && obs.windSpeed.value != null) ? obs.windSpeed.value : null;\nconst windMph = windKmh !== null ? (windKmh * 0.621371) : null;\n\nconst condition = obs.textDescription || 'Unknown';\n\n// ---- NOAA Heat Index, used when T >= 80F and humidity is available ----\n// Follows the full NWS procedure (not just the Rothfusz regression on its own):\n// 1. Start with the simple approximation.\n// 2. Only switch to the full Rothfusz regression (+ low/high-humidity adjustment)\n//    if the average of T and the simple estimate is itself >= 80F. Skipping this\n//    check makes the regression overshoot near the 80F boundary, which is the\n//    likely reason this was reading a bit higher than NWS-based tools like OSHA's\n//    Heat Safety Tool.\nfunction calcHeatIndex(T, RH) {\n  if (T === null || RH === null || T < 80) return null;\n\n  const simple = 0.5 * (T + 61.0 + ((T - 68.0) * 1.2) + (RH * 0.094));\n  if ((simple + T) / 2 < 80) {\n    return Math.round(simple * 10) / 10;\n  }\n\n  let HI = -42.379 + 2.04901523 * T + 10.14333127 * RH - 0.22475541 * T * RH\n    - 0.00683783 * T * T - 0.05481717 * RH * RH + 0.00122874 * T * T * RH\n    + 0.00085282 * T * RH * RH - 0.00000199 * T * T * RH * RH;\n  if (RH < 13 && T >= 80 && T <= 112) {\n    HI -= ((13 - RH) / 4) * Math.sqrt((17 - Math.abs(T - 95)) / 17);\n  } else if (RH > 85 && T >= 80 && T <= 87) {\n    HI += ((RH - 85) / 10) * ((87 - T) / 5);\n  }\n  return Math.round(HI * 10) / 10;\n}\n\n// ---- NWS Wind Chill (2001 formula), used when T <= 50F and wind >= 3 mph ----\nfunction calcWindChill(T, V) {\n  if (T === null || V === null || T > 50 || V < 3) return null;\n  const WC = 35.74 + 0.6215 * T - 35.75 * Math.pow(V, 0.16) + 0.4275 * T * Math.pow(V, 0.16);\n  return Math.round(WC * 10) / 10;\n}\n\nconst heatIndex = calcHeatIndex(tempF, rh);\nconst windChill = calcWindChill(tempF, windMph);\n\n// ---- Feels Like: Heat Index > Wind Chill > Actual Temp ----\nlet feelsLike;\nif (heatIndex !== null) feelsLike = heatIndex;\nelse if (windChill !== null) feelsLike = windChill;\nelse feelsLike = tempF;\n\nconst riskValue = feelsLike !== null ? Math.round(feelsLike * 10) / 10 : null;\n\n// ---- Zone ----\nlet zone = 'UNKNOWN';\nif (riskValue !== null) {\n  if (riskValue <= 90) zone = 'GREEN';\n  else if (riskValue <= 103) zone = 'YELLOW';\n  else if (riskValue <= 115) zone = 'RED';\n  else zone = 'BLACK';\n}\n\nreturn [{\n  json: {\n    temperature: tempF !== null ? Math.round(tempF * 10) / 10 : null,\n    feelsLike: feelsLike !== null ? Math.round(feelsLike * 10) / 10 : null,\n    heatIndex,\n    windChill,\n    humidity: rh !== null ? Math.round(rh * 10) / 10 : null,\n    wind: windMph !== null ? Math.round(windMph * 10) / 10 : null,\n    condition,\n    riskValue,\n    zone,\n    updated: new Date().toISOString(),\n    firebaseBaseUrl: config.firebaseBaseUrl,\n    firebaseAuth: config.firebaseAuth,\n    fromEmail: config.fromEmail,\n    recipient1: config.recipient1,\n    recipient2: config.recipient2\n  }\n}];\n"
+      },
+      "id": "47c27917-9b9e-4a22-8e69-066ff8ea1a7c",
+      "name": "Calculate Feels Like & Risk",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.firebaseBaseUrl}}/status/zone.json{{$json.firebaseAuth ? ('?auth=' + $json.firebaseAuth) : ''}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "f4759548-2876-4865-a7c5-a13e4f7ff41d",
+      "name": "Get Previous Zone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        784,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// $input here is the raw previous-zone value read from Firebase (a plain string, or null on first run).\nconst current = $('Calculate Feels Like & Risk').first().json;\nlet previousZone = $input.first().json.data;\n\n// Firebase returns the raw value as a string (e.g. \"GREEN\") or null if the path doesn't exist yet.\n// Strip quotes if Firebase wrapped it.\nif (typeof previousZone === 'string') {\n  previousZone = previousZone.replace(/^\"|\"$/g, '');\n}\nif (typeof previousZone !== 'string' || previousZone === 'null') previousZone = null;\n\n// Only treat it as a \"change\" if we had a real previous value that differs.\n// This avoids firing a false alert on the very first run.\nconst zoneChanged = previousZone !== null && previousZone !== current.zone;\n\n// Check if we are in quiet hours (21:00 to 05:00 Mountain Time)\nconst now = new Date();\nconst hour = now.getHours(); // Local hour in the server timezone\nconst inQuietHours = hour >= 21 || hour < 5;\n\nreturn [{\n  json: {\n    ...current,\n    previousZone: previousZone || current.zone,\n    zoneChanged,\n    inQuietHours,\n    currentHour: hour\n  }\n}];\n"
+      },
+      "id": "3fe30c8e-e914-4b49-b112-a34ef7fb14d0",
+      "name": "Compare Zones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{$json.zoneChanged}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "901924cf-9a44-452b-a2c8-0cdbb0d80815",
+      "name": "Zone Changed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1232,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$json.fromEmail}}",
+        "toEmail": "={{$json.recipient1}},{{$json.recipient2}}",
+        "subject": "=Wendover Weather Alert: {{$json.previousZone}} -> {{$json.zone}}",
+        "html": "=<h2>Wendover Weather Zone Change</h2><p><b>{{$json.previousZone}} &rarr; {{$json.zone}}</b></p><ul><li>Risk Value (Feels Like): {{$json.riskValue}}\u00b0F</li><li>Actual Temperature: {{$json.temperature}}\u00b0F</li><li>Heat Index: {{$json.heatIndex !== null && $json.heatIndex !== undefined ? $json.heatIndex + '\u00b0F' : 'n/a'}}</li><li>Wind Chill: {{$json.windChill !== null && $json.windChill !== undefined ? $json.windChill + '\u00b0F' : 'n/a'}}</li><li>Humidity: {{$json.humidity ?? 'n/a'}}%</li><li>Wind Speed: {{$json.wind}} mph</li><li>Condition: {{$json.condition}}</li><li>Updated: {{$json.updated}}</li></ul><p>Wendover Weather Alert System</p>",
+        "options": {}
+      },
+      "id": "bbc24b60-3148-4b11-8bb1-35a915bc5d45",
+      "name": "Send Zone Change Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1680,
+        480
+      ],
+      "webhookId": "8d9157d0-fb70-4ce4-b9a8-a5962f84c799",
+      "credentials": {
+        "smtp": {
+          "id": "79VLu1msvjb3JR2C",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $(\"Compare Zones\").item.json.firebaseBaseUrl }}/status.json{{ $(\"Compare Zones\").item.json.firebaseAuth ? ('?auth=' + $(\"Compare Zones\").item.json.firebaseAuth) : ''}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ zone: $(\"Compare Zones\").item.json.zone, previousZone: $(\"Compare Zones\").item.json.previousZone, updated: $(\"Compare Zones\").item.json.updated }) }}",
+        "options": {}
+      },
+      "id": "bc5b354b-463c-41c3-adac-022bec594add",
+      "name": "Update Firebase Status (Changed)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1904,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $(\"Compare Zones\").item.json.firebaseBaseUrl }}/weather.json{{ $(\"Compare Zones\").item.json.firebaseAuth ? ('?auth=' + $(\"Compare Zones\").item.json.firebaseAuth) : ''}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ temperature: $(\"Compare Zones\").item.json.temperature, feelsLike: $(\"Compare Zones\").item.json.feelsLike, heatIndex: $(\"Compare Zones\").item.json.heatIndex, windChill: $(\"Compare Zones\").item.json.windChill, humidity: $(\"Compare Zones\").item.json.humidity, wind: $(\"Compare Zones\").item.json.wind, condition: $(\"Compare Zones\").item.json.condition, riskValue: $(\"Compare Zones\").item.json.riskValue, zone: $(\"Compare Zones\").item.json.zone, updated: $(\"Compare Zones\").item.json.updated }) }}",
+        "options": {}
+      },
+      "id": "3c7b0274-e0bc-46d4-92da-2137a07d70c3",
+      "name": "Update Firebase Weather (Changed)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2128,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $(\"Compare Zones\").item.json.firebaseBaseUrl }}/history.json{{ $(\"Compare Zones\").item.json.firebaseAuth ? ('?auth=' + $(\"Compare Zones\").item.json.firebaseAuth) : ''}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fromZone: $(\"Compare Zones\").item.json.previousZone, toZone: $(\"Compare Zones\").item.json.zone, riskValue: $(\"Compare Zones\").item.json.riskValue, timestamp: $(\"Compare Zones\").item.json.updated, emailSent: true }) }}",
+        "options": {}
+      },
+      "id": "f22c9b31-3f27-48e3-8fe0-dd4a53abfe1a",
+      "name": "Log Alert History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2352,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{$json.firebaseBaseUrl}}/status.json{{$json.firebaseAuth ? ('?auth=' + $json.firebaseAuth) : ''}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ zone: $json.zone, previousZone: $json.previousZone, updated: $json.updated }) }}",
+        "options": {}
+      },
+      "id": "2d7e59b9-1760-4187-87e9-ac6d0ef7ac45",
+      "name": "Update Firebase Status (No Change)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2576,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Compare Zones').item.json.firebaseBaseUrl }}/weather.json{{ $('Compare Zones').item.json.firebaseAuth ? ('?auth=' + $('Compare Zones').item.json.firebaseAuth) : ''}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ temperature: $('Compare Zones').item.json.temperature, feelsLike: $('Compare Zones').item.json.feelsLike, heatIndex: $('Compare Zones').item.json.heatIndex, windChill: $('Compare Zones').item.json.windChill, humidity: $('Compare Zones').item.json.humidity, wind: $('Compare Zones').item.json.wind, condition: $('Compare Zones').item.json.condition, riskValue: $('Compare Zones').item.json.riskValue, zone: $('Compare Zones').item.json.zone, updated: $('Compare Zones').item.json.updated }) }}",
+        "options": {}
+      },
+      "id": "6eb1af4f-6c0c-4da3-871a-1e9f1659d52c",
+      "name": "Update Firebase Weather (No Change)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2800,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{$json.inQuietHours}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f422cdb3-50e1-499e-abe6-d543c6ac781a",
+      "name": "Check Quiet Hours",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1456,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $(\"Compare Zones\").item.json.firebaseBaseUrl }}/pendingAlert.json{{ $(\"Compare Zones\").item.json.firebaseAuth ? ('?auth=' + $(\"Compare Zones\").item.json.firebaseAuth) : ''}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ hasPending: true, fromZone: $(\"Compare Zones\").item.json.previousZone, toZone: $(\"Compare Zones\").item.json.zone, riskValue: $(\"Compare Zones\").item.json.riskValue, temperature: $(\"Compare Zones\").item.json.temperature, feelsLike: $(\"Compare Zones\").item.json.feelsLike, heatIndex: $(\"Compare Zones\").item.json.heatIndex, windChill: $(\"Compare Zones\").item.json.windChill, humidity: $(\"Compare Zones\").item.json.humidity, wind: $(\"Compare Zones\").item.json.wind, condition: $(\"Compare Zones\").item.json.condition, suppressedAt: $(\"Compare Zones\").item.json.updated }) }}",
+        "options": {}
+      },
+      "id": "461a76a1-0e51-46cb-bd50-ff91ea764d76",
+      "name": "Store Pending Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.firebaseBaseUrl }}/pendingAlert.json{{ $json.firebaseAuth ? ('?auth=' + $json.firebaseAuth) : ''}}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "c65a6f09-e8f5-46d1-904a-9d1494f9273e",
+      "name": "Get Pending Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1456,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = $('Compare Zones').first().json;\nconst pendingData = $input.first().json.data;\n\nlet hasPending = false;\nlet pendingAlert = null;\n\nif (pendingData && typeof pendingData === 'object' && pendingData.hasPending === true) {\n  hasPending = true;\n  pendingAlert = pendingData;\n}\n\nreturn [{\n  json: {\n    ...current,\n    hasPending,\n    pendingAlert\n  }\n}];\n"
+      },
+      "id": "ea22b842-0a87-470c-a3ca-733ecc1d4707",
+      "name": "Check Pending Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{$json.hasPending}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "955b99d9-0447-47a8-8c62-6946574ed171",
+      "name": "Has Pending Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1904,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$json.fromEmail}}",
+        "toEmail": "={{$json.recipient1}},{{$json.recipient2}}",
+        "subject": "=Wendover Weather Status Update: {{$json.zone}}",
+        "html": "=<h2>Wendover Weather Status Update</h2><p><b>Current Zone: {{$json.zone}}</b></p><ul><li>Risk Value (Feels Like): {{$json.riskValue}}\u00b0F</li><li>Actual Temperature: {{$json.temperature}}\u00b0F</li><li>Heat Index: {{$json.heatIndex !== null && $json.heatIndex !== undefined ? $json.heatIndex + '\u00b0F' : 'n/a'}}</li><li>Wind Chill: {{$json.windChill !== null && $json.windChill !== undefined ? $json.windChill + '\u00b0F' : 'n/a'}}</li><li>Humidity: {{$json.humidity ?? 'n/a'}}%</li><li>Wind Speed: {{$json.wind}} mph</li><li>Condition: {{$json.condition}}</li><li>Updated: {{$json.updated}}</li></ul><p><em>This update was sent because a zone change occurred during quiet hours (21:00-05:00).</em></p><p>Wendover Weather Alert System</p>",
+        "options": {}
+      },
+      "id": "032ee39a-6813-472a-b7a0-54581292e1c0",
+      "name": "Send Status Update Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2128,
+        864
+      ],
+      "webhookId": "3a0f5f29-c229-4acc-b188-8cdd96fcec59",
+      "credentials": {
+        "smtp": {
+          "id": "79VLu1msvjb3JR2C",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $(\"Compare Zones\").item.json.firebaseBaseUrl }}/pendingAlert.json{{ $(\"Compare Zones\").item.json.firebaseAuth ? ('?auth=' + $(\"Compare Zones\").item.json.firebaseAuth) : ''}}",
+        "options": {}
+      },
+      "id": "faabbee0-0624-4a99-ba89-00146dc8279f",
+      "name": "Clear Pending Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2352,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Daily Forecast\nSends a forecast email at 5:00 AM daily with expected zone changes during alert hours (5:00 AM - 8:59 PM).",
+        "height": 400,
+        "width": 1468,
+        "color": 3
+      },
+      "id": "95a9ba13-53ee-45a2-a816-00fd61205760",
+      "name": "Daily Forecast",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 5
+            }
+          ]
+        }
+      },
+      "id": "3efcee5b-a078-4a57-8e1a-5df4e4742a13",
+      "name": "Daily Forecast Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -112,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "lat",
+              "type": "number",
+              "value": 40.7186
+            },
+            {
+              "id": "c2",
+              "name": "lon",
+              "type": "number",
+              "value": -114.0308
+            },
+            {
+              "id": "c4",
+              "name": "fromEmail",
+              "type": "string",
+              "value": "Noelleuhl@icloud.com"
+            },
+            {
+              "id": "c5",
+              "name": "recipient1",
+              "type": "string",
+              "value": "Kendrick.uhles@cawgcadets.org"
+            },
+            {
+              "id": "c6",
+              "name": "recipient2",
+              "type": "string",
+              "value": "Maverick.mcnealy@utwg.cap.gov"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f7fe7b6b-582d-4769-9dc6-a3dca142fff5",
+      "name": "Forecast Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.weather.gov/points/{{$json.lat}},{{$json.lon}}",
+        "options": {}
+      },
+      "id": "63d070d3-31e2-48f4-9dcd-480f963a089e",
+      "name": "Get NOAA Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        336,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pointsData = $input.first().json.data;\nconst parsed = typeof pointsData === 'string' ? JSON.parse(pointsData) : pointsData;\nconst forecastUrl = parsed.properties.forecastHourly;\n\nreturn [{ json: { forecastUrl } }];\n"
+      },
+      "id": "099ec350-a55a-414e-af40-7fcf74592194",
+      "name": "Extract Forecast URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.forecastUrl}}",
+        "options": {}
+      },
+      "id": "b1c54290-9b3d-4c56-865b-5c2ac5ce38de",
+      "name": "Get Hourly Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        784,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const forecastRaw = $input.first().json.data;\nconst config = $('Forecast Config').first().json;\n\nlet forecastData;\ntry {\n  forecastData = typeof forecastRaw === 'string' ? JSON.parse(forecastRaw) : forecastRaw;\n} catch (e) {\n  forecastData = forecastRaw;\n}\n\nconst periods = forecastData.properties?.periods || [];\n\nfunction calcHeatIndex(T, RH) {\n  if (T === null || RH === null || T < 80) return null;\n  let HI = -42.379 + 2.04901523 * T + 10.14333127 * RH - 0.22475541 * T * RH\n    - 0.00683783 * T * T - 0.05481717 * RH * RH + 0.00122874 * T * T * RH\n    + 0.00085282 * T * RH * RH - 0.00000199 * T * T * RH * RH;\n  if (RH < 13 && T >= 80 && T <= 112) {\n    HI -= ((13 - RH) / 4) * Math.sqrt((17 - Math.abs(T - 95)) / 17);\n  } else if (RH > 85 && T >= 80 && T <= 87) {\n    HI += ((RH - 85) / 10) * ((87 - T) / 5);\n  }\n  return Math.round(HI * 10) / 10;\n}\n\nfunction calcWindChill(T, V) {\n  if (T === null || V === null || T > 50 || V < 3) return null;\n  const WC = 35.74 + 0.6215 * T - 35.75 * Math.pow(V, 0.16) + 0.4275 * T * Math.pow(V, 0.16);\n  return Math.round(WC * 10) / 10;\n}\n\nfunction getZone(feelsLike) {\n  if (feelsLike === null) return 'UNKNOWN';\n  if (feelsLike <= 90) return 'GREEN';\n  if (feelsLike <= 103) return 'YELLOW';\n  if (feelsLike <= 115) return 'RED';\n  return 'BLACK';\n}\n\nconst zoneChanges = [];\nlet currentZone = null;\n\nfor (const period of periods) {\n  const time = new Date(period.startTime);\n  const hour = time.getHours();\n  \n  // Only include periods during alert hours (05:00-20:59)\n  if (hour < 5 || hour >= 21) continue;\n  \n  const tempF = period.temperature;\n  const rh = period.relativeHumidity?.value || null;\n  const windStr = period.windSpeed || '0 mph';\n  const windMph = parseFloat(windStr);\n  \n  const heatIndex = calcHeatIndex(tempF, rh);\n  const windChill = calcWindChill(tempF, windMph);\n  \n  let feelsLike;\n  if (heatIndex !== null) feelsLike = heatIndex;\n  else if (windChill !== null) feelsLike = windChill;\n  else feelsLike = tempF;\n  \n  const zone = getZone(feelsLike);\n  \n  if (zone !== currentZone) {\n    const timeStr = time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });\n    zoneChanges.push({ zone, time: timeStr, feelsLike, temperature: tempF });\n    currentZone = zone;\n  }\n}\n\nreturn [{\n  json: {\n    zoneChanges,\n    fromEmail: config.fromEmail,\n    recipient1: config.recipient1,\n    recipient2: config.recipient2\n  }\n}];\n"
+      },
+      "id": "f16f75fe-ec8c-494c-b01b-f031947d230b",
+      "name": "Analyze Forecast Zones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$json.fromEmail}}",
+        "toEmail": "={{$json.recipient1}},{{$json.recipient2}}",
+        "subject": "=Wendover Weather Daily Forecast - {{ $now.toFormat(\"MMMM d, yyyy\") }}",
+        "html": "=<h2>Wendover Weather Daily Forecast</h2><p><b>Expected Zone Changes for {{ $now.toFormat(\"MMMM d, yyyy\") }}</b></p>{{ $json.zoneChanges.length > 0 ? \"<ul>\" + $json.zoneChanges.map(c => \"<li><b>\" + c.time + \"</b> - Entering <b>\" + c.zone + \"</b> zone (Feels Like: \" + c.feelsLike + \"\u00b0F, Temp: \" + c.temperature + \"\u00b0F)</li>\").join(\"\") + \"</ul>\" : \"<p>No zone changes expected today.</p>\" }}<p><em>This forecast is based on NOAA hourly predictions and may change.</em></p><p>Wendover Weather Alert System</p>",
+        "options": {}
+      },
+      "id": "642265c1-c7a4-4e4e-8685-fe7f60bd9a20",
+      "name": "Send Daily Forecast Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1232,
+        1168
+      ],
+      "webhookId": "1ac66676-4935-432e-9d00-5b4672ef5dea",
+      "credentials": {
+        "smtp": {
+          "id": "79VLu1msvjb3JR2C",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (every 10 min)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Get NOAA Observation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NOAA Observation": {
+      "main": [
+        [
+          {
+            "node": "Calculate Feels Like & Risk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Feels Like & Risk": {
+      "main": [
+        [
+          {
+            "node": "Get Previous Zone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Zone": {
+      "main": [
+        [
+          {
+            "node": "Compare Zones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Zones": {
+      "main": [
+        [
+          {
+            "node": "Zone Changed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zone Changed?": {
+      "main": [
+        [
+          {
+            "node": "Check Quiet Hours",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Pending Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Zone Change Email": {
+      "main": [
+        [
+          {
+            "node": "Update Firebase Status (Changed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Firebase Status (Changed)": {
+      "main": [
+        [
+          {
+            "node": "Update Firebase Weather (Changed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Firebase Weather (Changed)": {
+      "main": [
+        [
+          {
+            "node": "Log Alert History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Firebase Status (No Change)": {
+      "main": [
+        [
+          {
+            "node": "Update Firebase Weather (No Change)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Quiet Hours": {
+      "main": [
+        [
+          {
+            "node": "Store Pending Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Zone Change Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Pending Alert": {
+      "main": [
+        [
+          {
+            "node": "Update Firebase Status (Changed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Alert": {
+      "main": [
+        [
+          {
+            "node": "Check Pending Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Pending Alert": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Alert?": {
+      "main": [
+        [
+          {
+            "node": "Send Status Update Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Firebase Status (No Change)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Status Update Email": {
+      "main": [
+        [
+          {
+            "node": "Clear Pending Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Pending Alert": {
+      "main": [
+        [
+          {
+            "node": "Update Firebase Status (No Change)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Forecast Trigger": {
+      "main": [
+        [
+          {
+            "node": "Forecast Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forecast Config": {
+      "main": [
+        [
+          {
+            "node": "Get NOAA Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NOAA Forecast": {
+      "main": [
+        [
+          {
+            "node": "Extract Forecast URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Forecast URL": {
+      "main": [
+        [
+          {
+            "node": "Get Hourly Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Hourly Forecast": {
+      "main": [
+        [
+          {
+            "node": "Analyze Forecast Zones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Forecast Zones": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Forecast Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1216d5f3-768a-4c6c-8504-245717c84505",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8112cf6f2cf99790aee9668cf326f77584fe40df9a20d36e112ce28eccfa5483"
+  },
+  "nodeGroups": [],
+  "id": "bunyLjaJr81tn1z2",
+  "tags": []
+}
