@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Wendover Weather Watch — CAP Heat &amp; Cold Risk Monitor</title>
+<meta name="description" content="Live heat and cold risk monitor for Wendover, Utah. NOAA/NWS weather, Open-Meteo UV, and CAP flag-condition zone status." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink:#11151b;
+    --ink-deep:#0b0e12;
+    --panel:#1b212a;
+    --panel-line:#2b3340;
+    --sand:#c9a227;
+    --paper:#f4efe3;
+    --muted:#8a93a3;
+    --muted-dim:#5b6373;
+
+    --flag-green:#3fae66;
+    --flag-green-bg:#152a1c;
+    --flag-yellow:#e0b21b;
+    --flag-yellow-bg:#2d260f;
+    --flag-red:#e0473a;
+    --flag-red-bg:#341310;
+    --flag-black:#f4efe3;
+    --flag-black-bg:#06070a;
+
+    --zone-accent: var(--flag-green);
+    --zone-bg: var(--flag-green-bg);
+
+    --radius: 14px;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'Inter', sans-serif;
+    --font-mono:'JetBrains Mono', monospace;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--sand);}
+
+  .wrap{
+    max-width:1080px;
+    margin:0 auto;
+    padding:0 20px 60px;
+  }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    padding:22px 0 16px;
+    border-bottom:1px solid var(--panel-line);
+    flex-wrap:wrap;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .brand .pennant{
+    width:20px;height:20px;flex:none;
+  }
+  .brand-text{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--muted);
+    line-height:1.4;
+  }
+  .brand-text strong{
+    display:block;
+    color:var(--paper);
+    font-size:13px;
+    letter-spacing:.08em;
+  }
+  .top-status{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--muted);
+  }
+  .trend-pill{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:5px 10px;
+    border:1px solid var(--panel-line);
+    border-radius:999px;
+    background:var(--panel);
+  }
+  .refresh-btn{
+    background:var(--panel);
+    border:1px solid var(--panel-line);
+    color:var(--paper);
+    border-radius:999px;
+    width:30px;height:30px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    transition:transform .4s ease, border-color .2s ease;
+  }
+  .refresh-btn:hover{border-color:var(--sand);}
+  .refresh-btn.spin svg{animation:spin .7s linear;}
+  @keyframes spin{ to { transform:rotate(360deg); } }
+
+  /* ---------- Stale / error banner ---------- */
+  .banner{
+    display:none;
+    margin-top:16px;
+    padding:10px 14px;
+    border-radius:10px;
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    letter-spacing:.02em;
+    border:1px solid #5b4413;
+    background:#241d0c;
+    color:#e0b21b;
+  }
+  .banner.show{display:block;}
+  .banner.demo{
+    border-color:#33415a;
+    background:#121a24;
+    color:#7fa8d9;
+  }
+
+  /* ---------- Hero ---------- */
+  .hero{
+    margin-top:22px;
+    border-radius:var(--radius);
+    border:1px solid var(--panel-line);
+    background:var(--zone-bg);
+    padding:34px 30px;
+    position:relative;
+    overflow:hidden;
+    transition:background-color .6s ease;
+  }
+  .hero::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(135deg, rgba(255,255,255,.05), transparent 55%);
+    pointer-events:none;
+  }
+  .hero[data-zone="BLACK"]{
+    background:
+      repeating-linear-gradient(135deg, rgba(244,239,227,.06) 0 14px, transparent 14px 28px),
+      var(--flag-black-bg);
+    border-color:var(--flag-red);
+  }
+  .hero-row{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:24px;
+    flex-wrap:wrap;
+    position:relative;
+    z-index:1;
+  }
+  .hero-eyebrow{
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--zone-accent);
+    display:flex;
+    align-items:center;
+    gap:9px;
+    margin-bottom:10px;
+  }
+  .pennant-flag{
+    width:18px;height:18px;
+    display:inline-block;
+    transform-origin:0% 50%;
+    animation:wave 3.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce){ .pennant-flag{animation:none;} }
+  @keyframes wave{
+    0%,100%{ transform:skewY(0deg) scaleX(1); }
+    50%{ transform:skewY(3deg) scaleX(.97); }
+  }
+  .zone-name{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:clamp(38px, 7vw, 64px);
+    line-height:1;
+    color:var(--zone-accent);
+    margin:0;
+    letter-spacing:.01em;
+  }
+  .hero[data-zone="BLACK"] .zone-name{ color:var(--flag-black); }
+  .hero[data-zone="RED"], .hero[data-zone="BLACK"]{
+    animation:pulse-bg 2.6s ease-in-out infinite;
+  }
+  @keyframes pulse-bg{
+    0%,100%{ filter:brightness(1); }
+    50%{ filter:brightness(1.18); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .hero[data-zone="RED"], .hero[data-zone="BLACK"]{ animation:none; }
+  }
+  .zone-desc{
+    font-family:var(--font-body);
+    font-size:14.5px;
+    color:var(--paper);
+    opacity:.88;
+    max-width:480px;
+    margin-top:10px;
+    line-height:1.5;
+  }
+  .hero-risk{
+    text-align:right;
+    min-width:200px;
+  }
+  .risk-label{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .risk-value{
+    font-family:var(--font-mono);
+    font-weight:700;
+    font-size:42px;
+    color:var(--paper);
+    line-height:1.1;
+  }
+  .risk-sub{
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--muted);
+  }
+
+  /* ---------- Stat grid ---------- */
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:1px;
+    margin-top:22px;
+    background:var(--panel-line);
+    border:1px solid var(--panel-line);
+    border-radius:var(--radius);
+    overflow:hidden;
+  }
+  @media (max-width:760px){ .grid{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:420px){ .grid{ grid-template-columns:1fr; } }
+
+  .stat{
+    background:var(--panel);
+    padding:18px 18px 16px;
+    min-height:96px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+  }
+  .stat-label{
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .stat-value{
+    font-family:var(--font-mono);
+    font-weight:500;
+    font-size:24px;
+    color:var(--paper);
+    margin-top:8px;
+    display:flex;
+    align-items:baseline;
+    gap:4px;
+  }
+  .stat-value .unit{
+    font-size:13px;
+    color:var(--muted);
+    font-weight:400;
+  }
+  .stat-value.dim{ color:var(--muted-dim); font-size:18px; }
+  .stat.accent .stat-value{ color:var(--zone-accent); }
+
+  /* ---------- Radio script card ---------- */
+  .script-card{
+    margin-top:18px;
+    background:var(--panel);
+    border:1px solid var(--panel-line);
+    border-radius:var(--radius);
+    padding:20px 22px;
+  }
+  .script-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:12px;
+  }
+  .script-eyebrow{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--sand);
+  }
+  .override-wrap{ position:relative; }
+  .override-btn{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--muted);
+    background:transparent;
+    border:1px solid var(--panel-line);
+    border-radius:999px;
+    padding:5px 12px;
+    cursor:pointer;
+    transition:border-color .2s ease, color .2s ease;
+  }
+  .override-btn:hover{ border-color:var(--sand); color:var(--paper); }
+  .override-panel{
+    position:absolute;
+    right:0;
+    top:calc(100% + 8px);
+    background:var(--panel);
+    border:1px solid var(--panel-line);
+    border-radius:10px;
+    padding:10px 12px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    z-index:5;
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+    white-space:nowrap;
+  }
+  .override-panel label{
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .override-panel select{
+    font-family:var(--font-mono);
+    font-size:12px;
+    background:var(--ink);
+    color:var(--paper);
+    border:1px solid var(--panel-line);
+    border-radius:6px;
+    padding:4px 6px;
+  }
+  .script-text{
+    font-family:var(--font-mono);
+    font-size:15px;
+    line-height:1.7;
+    color:var(--paper);
+    margin:0;
+  }
+  .script-text .blank{
+    color:var(--zone-accent);
+    font-weight:700;
+    padding:0 2px;
+  }
+  .override-flag{
+    margin-top:12px;
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    color:#e0b21b;
+  }
+  .override-flag span{ font-weight:700; }
+
+  /* ---------- Footer ---------- */
+  footer{
+    margin-top:26px;
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:16px;
+    flex-wrap:wrap;
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--muted-dim);
+    letter-spacing:.02em;
+    padding-top:16px;
+    border-top:1px solid var(--panel-line);
+  }
+  footer .legend{
+    display:flex;
+    gap:14px;
+    flex-wrap:wrap;
+  }
+  .legend-item{ display:flex; align-items:center; gap:6px; }
+  .legend-dot{ width:8px;height:8px;border-radius:2px; }
+
+  .sr-only{
+    position:absolute; width:1px; height:1px;
+    overflow:hidden; clip:rect(0,0,0,0);
+  }
+
+  :focus-visible{
+    outline:2px solid var(--sand);
+    outline-offset:2px;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="pennant" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 2v20" stroke="#8a93a3" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M3 3 L19 8 L3 13 Z" fill="#c9a227"/>
+      </svg>
+      <div class="brand-text">
+        Wendover, Utah · Civil Air Patrol
+        <strong>Heat &amp; Cold Risk Monitor</strong>
+      </div>
+    </div>
+    <div class="top-status">
+      <span class="trend-pill" id="trendPill" title="Risk trend since last reading">
+        <span id="trendArrow" aria-hidden="true">→</span>
+        <span id="trendLabel">steady</span>
+      </span>
+      <span id="lastUpdate" title="">last update —</span>
+      <button class="refresh-btn" id="refreshBtn" aria-label="Refresh now" title="Refresh now">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+          <path d="M21 3v6h-6"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="banner" id="staleBanner" role="status">⚠ Data hasn't updated in a while — the automation feed may be offline. Showing the last known reading.</div>
+  <div class="banner demo" id="demoBanner" role="status">◆ Demo data — connect <code id="demoUrlHint">FIREBASE_BASE_URL</code> in the script config to go live.</div>
+
+  <main>
+    <section class="hero" id="hero" data-zone="GREEN" aria-live="polite">
+      <div class="hero-row">
+        <div>
+          <div class="hero-eyebrow">
+            <svg class="pennant-flag" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 2v20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M3 3 L19 8 L3 13 Z" fill="currentColor"/>
+            </svg>
+            Current Zone
+          </div>
+          <h1 class="zone-name" id="zoneName">GREEN</h1>
+          <p class="zone-desc" id="zoneDesc">Normal activity. Stay hydrated and monitor conditions.</p>
+        </div>
+        <div class="hero-risk">
+          <div class="risk-label">Risk Value</div>
+          <div class="risk-value"><span id="riskValue">—</span>°F</div>
+          <div class="risk-sub" id="riskSub">feels-like temperature</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid" aria-label="Current conditions">
+      <div class="stat">
+        <div class="stat-label">Temperature</div>
+        <div class="stat-value"><span id="temperature">—</span><span class="unit">°F</span></div>
+      </div>
+      <div class="stat accent">
+        <div class="stat-label">Feels Like</div>
+        <div class="stat-value"><span id="feelsLike">—</span><span class="unit">°F</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Heat Index</div>
+        <div class="stat-value" id="heatIndexWrap"><span id="heatIndex">—</span><span class="unit">°F</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Wind Chill</div>
+        <div class="stat-value" id="windChillWrap"><span id="windChill">—</span><span class="unit">°F</span></div>
+      </div>
+
+      <div class="stat">
+        <div class="stat-label">Humidity</div>
+        <div class="stat-value"><span id="humidity">—</span><span class="unit">%</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Wind Speed</div>
+        <div class="stat-value"><span id="wind">—</span><span class="unit">mph</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Condition</div>
+        <div class="stat-value" id="conditionWrap"><span id="condition">—</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Risk Value</div>
+        <div class="stat-value"><span id="riskValue2">—</span><span class="unit">°F</span></div>
+      </div>
+
+      <div class="stat">
+        <div class="stat-label">UV Index</div>
+        <div class="stat-value"><span id="uv">—</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">UV Category</div>
+        <div class="stat-value" id="uvCategoryWrap"><span id="uvCategory">—</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Trend</div>
+        <div class="stat-value" id="trendWrap"><span id="trendValue">steady</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Last Update</div>
+        <div class="stat-value dim" id="lastUpdateFull">—</div>
+      </div>
+    </section>
+
+    <section class="script-card" aria-label="Radio script">
+      <div class="script-head">
+        <span class="script-eyebrow">Radio Script — Read Aloud</span>
+        <div class="override-wrap">
+          <button class="override-btn" id="overrideBtn" aria-expanded="false" aria-controls="overridePanel">Override</button>
+          <div class="override-panel" id="overridePanel" hidden>
+            <label for="overrideSelect">Force heat level</label>
+            <select id="overrideSelect">
+              <option value="">Auto (live)</option>
+              <option value="GREEN">GREEN</option>
+              <option value="YELLOW">YELLOW</option>
+              <option value="RED">RED</option>
+              <option value="BLACK">BLACK</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <p class="script-text">All personnel, the current temperature outside is <span class="blank" id="scriptTemp">—</span>&deg;F making the encampment heat level <span class="blank" id="scriptZone">—</span>. The ratio of breaks is <span class="blank" id="scriptHighWork">—</span> minutes high intensity activities to a <span class="blank" id="scriptHighBreak">—</span> minute break, <span class="blank" id="scriptMedWork">—</span> minutes medium intensity activities to a <span class="blank" id="scriptMedBreak">—</span> minute break, and <span class="blank" id="scriptLowWork">—</span> minutes low intensity activities to a <span class="blank" id="scriptLowBreak">—</span> minute break. Admin team out.</p>
+      <div class="override-flag" id="overrideFlag" hidden>&#9888; Manual override active — reading <span id="overrideFlagZone"></span> instead of the live zone</div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot" style="background:var(--flag-green)"></span>GREEN ≤90°F</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--flag-yellow)"></span>YELLOW 91–102°F</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--flag-red)"></span>RED 103–114°F</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--flag-black)"></span>BLACK ≥115°F</span>
+    </div>
+    <div>Sources: NOAA / National Weather Service · Open-Meteo (UV) — refreshes every 10 minutes</div>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+
+  /* =======================================================
+     CONFIG — edit these two lines for your deployment
+     ======================================================= */
+  const CONFIG = {
+    // Your Firebase Realtime Database base URL, e.g.
+    // "https://wendover-weather-default-rtdb.firebaseio.com"
+    firebaseBaseUrl: "https://temperature-alerting-default-rtdb.firebaseio.com",
+    // Optional: Firebase DB secret / auth token appended as ?auth=, leave "" if your
+    // /status and /weather read rules are public.
+    firebaseAuth: "",
+    refreshIntervalMs: 10 * 60 * 1000, // 10 minutes
+    staleAfterMs: 20 * 60 * 1000       // warn if data is older than 20 minutes
+  };
+
+  document.getElementById('demoUrlHint').textContent = CONFIG.firebaseBaseUrl;
+
+  const els = {
+    hero: document.getElementById('hero'),
+    zoneName: document.getElementById('zoneName'),
+    zoneDesc: document.getElementById('zoneDesc'),
+    riskValue: document.getElementById('riskValue'),
+    riskValue2: document.getElementById('riskValue2'),
+    riskSub: document.getElementById('riskSub'),
+    temperature: document.getElementById('temperature'),
+    feelsLike: document.getElementById('feelsLike'),
+    heatIndex: document.getElementById('heatIndex'),
+    windChill: document.getElementById('windChill'),
+    humidity: document.getElementById('humidity'),
+    wind: document.getElementById('wind'),
+    condition: document.getElementById('condition'),
+    uv: document.getElementById('uv'),
+    uvCategory: document.getElementById('uvCategory'),
+    trendValue: document.getElementById('trendValue'),
+    trendArrow: document.getElementById('trendArrow'),
+    trendLabel: document.getElementById('trendLabel'),
+    lastUpdate: document.getElementById('lastUpdate'),
+    lastUpdateFull: document.getElementById('lastUpdateFull'),
+    staleBanner: document.getElementById('staleBanner'),
+    demoBanner: document.getElementById('demoBanner'),
+    refreshBtn: document.getElementById('refreshBtn'),
+    scriptTemp: document.getElementById('scriptTemp'),
+    scriptZone: document.getElementById('scriptZone'),
+    scriptHighWork: document.getElementById('scriptHighWork'),
+    scriptHighBreak: document.getElementById('scriptHighBreak'),
+    scriptMedWork: document.getElementById('scriptMedWork'),
+    scriptMedBreak: document.getElementById('scriptMedBreak'),
+    scriptLowWork: document.getElementById('scriptLowWork'),
+    scriptLowBreak: document.getElementById('scriptLowBreak'),
+    overrideBtn: document.getElementById('overrideBtn'),
+    overridePanel: document.getElementById('overridePanel'),
+    overrideSelect: document.getElementById('overrideSelect'),
+    overrideFlag: document.getElementById('overrideFlag'),
+    overrideFlagZone: document.getElementById('overrideFlagZone')
+  };
+
+  // EDIT ME — these work/rest minute pairs are placeholders. Replace with
+  // your encampment's actual approved work/rest cycle for each heat level.
+  const ZONE_BREAKS = {
+    GREEN:  { high: { work: 50, break: 10 }, medium: { work: 50, break: 10 }, low: { work: 50, break: 10 } },
+    YELLOW: { high: { work: 40, break: 10 }, medium: { work: 50, break: 10 }, low: { work: 50, break: 10 } },
+    RED:    { high: { work: 30, break: 10 }, medium: { work: 40, break: 10 }, low: { work: 50, break: 10 } },
+    BLACK:  { high: { work: 0,  break: 60 }, medium: { work: 10, break: 50 }, low: { work: 20, break: 40 } }
+  };
+
+  let lastWeather = null;
+
+  function getOverride(){
+    return localStorage.getItem('wendover_zone_override') || "";
+  }
+  function setOverride(zone){
+    if (zone) localStorage.setItem('wendover_zone_override', zone);
+    else localStorage.removeItem('wendover_zone_override');
+  }
+
+  function renderScript(weather){
+    if (!weather) return;
+    const override = getOverride();
+    const effectiveZone = override || weather.zone || 'UNKNOWN';
+    const breaks = ZONE_BREAKS[effectiveZone];
+
+    els.scriptTemp.textContent = fmt(weather.temperature, 0);
+    els.scriptZone.textContent = effectiveZone;
+
+    if (breaks){
+      els.scriptHighWork.textContent = breaks.high.work;
+      els.scriptHighBreak.textContent = breaks.high.break;
+      els.scriptMedWork.textContent = breaks.medium.work;
+      els.scriptMedBreak.textContent = breaks.medium.break;
+      els.scriptLowWork.textContent = breaks.low.work;
+      els.scriptLowBreak.textContent = breaks.low.break;
+    } else {
+      [els.scriptHighWork, els.scriptHighBreak, els.scriptMedWork, els.scriptMedBreak, els.scriptLowWork, els.scriptLowBreak]
+        .forEach(el => el.textContent = "—");
+    }
+
+    if (override){
+      els.overrideFlag.hidden = false;
+      els.overrideFlagZone.textContent = override;
+    } else {
+      els.overrideFlag.hidden = true;
+    }
+    els.overrideSelect.value = override;
+  }
+
+  const ZONE_DESC = {
+    GREEN: "Normal activity. Stay hydrated and monitor conditions.",
+    YELLOW: "Increased risk. Increase water intake and schedule rest breaks.",
+    RED: "High risk. Limit strenuous outdoor activity; enforce rest/water cycles.",
+    BLACK: "Extreme risk. Suspend outdoor activity. Seek shade or air conditioning immediately.",
+    UNKNOWN: "Awaiting a valid reading."
+  };
+
+  function fmt(n, digits){
+    if (n === null || n === undefined || n === "" || Number.isNaN(n)) return "—";
+    return Number(n).toFixed(digits === undefined ? 0 : digits).replace(/\.0$/, '');
+  }
+
+  function relativeTime(iso){
+    if (!iso) return "no data yet";
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return "no data yet";
+    const diffMin = Math.round((Date.now() - then) / 60000);
+    if (diffMin <= 0) return "just now";
+    if (diffMin === 1) return "1 min ago";
+    if (diffMin < 60) return diffMin + " min ago";
+    const h = Math.floor(diffMin / 60);
+    return h + "h " + (diffMin % 60) + "m ago";
+  }
+
+  function render(weather, status){
+    const zone = (status && status.zone) || (weather && weather.zone) || "UNKNOWN";
+
+    els.hero.dataset.zone = zone;
+    els.zoneName.textContent = zone;
+    els.zoneDesc.textContent = ZONE_DESC[zone] || ZONE_DESC.UNKNOWN;
+
+    const risk = weather && weather.riskValue;
+    els.riskValue.textContent = fmt(risk, 1);
+    els.riskValue2.textContent = fmt(risk, 1);
+
+    els.temperature.textContent = fmt(weather && weather.temperature, 1);
+    els.feelsLike.textContent = fmt(weather && weather.feelsLike, 1);
+    els.heatIndex.textContent = (weather && weather.heatIndex != null) ? fmt(weather.heatIndex, 1) : "—";
+    els.windChill.textContent = (weather && weather.windChill != null) ? fmt(weather.windChill, 1) : "—";
+    els.humidity.textContent = (weather && weather.humidity != null) ? fmt(weather.humidity, 0) : "—";
+    els.wind.textContent = fmt(weather && weather.wind, 1);
+    els.condition.textContent = (weather && weather.condition) || "—";
+    els.uv.textContent = (weather && weather.uv != null) ? fmt(weather.uv, 1) : "—";
+    els.uvCategory.textContent = (weather && weather.uvCategory) || "—";
+
+    // trend: compare to last value cached in this browser
+    const prev = parseFloat(localStorage.getItem('wendover_prev_risk'));
+    let arrow = "→", label = "steady";
+    if (!Number.isNaN(prev) && risk != null){
+      const delta = risk - prev;
+      if (delta > 0.5){ arrow = "↑"; label = "rising"; }
+      else if (delta < -0.5){ arrow = "↓"; label = "falling"; }
+    }
+    els.trendArrow.textContent = arrow;
+    els.trendLabel.textContent = label;
+    els.trendValue.textContent = label + " " + arrow;
+    if (risk != null) localStorage.setItem('wendover_prev_risk', risk);
+
+    const updated = (weather && weather.updated) || (status && status.updated);
+    els.lastUpdate.textContent = "last update " + relativeTime(updated);
+    els.lastUpdate.title = updated ? new Date(updated).toString() : "";
+    els.lastUpdateFull.textContent = updated ? new Date(updated).toLocaleString() : "—";
+
+    const isStale = updated && (Date.now() - new Date(updated).getTime() > CONFIG.staleAfterMs);
+    els.staleBanner.classList.toggle('show', !!isStale);
+
+    lastWeather = { temperature: weather && weather.temperature, zone: zone };
+    renderScript(lastWeather);
+  }
+
+  function demoData(){
+    return {
+      weather: {
+        temperature: 94.2, feelsLike: 99.6, heatIndex: 99.6, windChill: null,
+        humidity: 19, wind: 8.4, condition: "Sunny", uv: 8.6, uvCategory: "Very High",
+        riskValue: 99.6, zone: "YELLOW", updated: new Date().toISOString()
+      },
+      status: { zone: "YELLOW", previousZone: "GREEN", updated: new Date().toISOString() }
+    };
+  }
+
+  async function fetchJSON(url){
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
+  async function load(){
+    els.refreshBtn.classList.add('spin');
+    const base = CONFIG.firebaseBaseUrl;
+    const authQS = CONFIG.firebaseAuth ? ("?auth=" + encodeURIComponent(CONFIG.firebaseAuth)) : "";
+    const isPlaceholder = base.indexOf("REPLACE-WITH-YOUR-PROJECT") !== -1;
+
+    try {
+      if (isPlaceholder) throw new Error("Firebase not configured");
+
+      const [weather, status] = await Promise.all([
+        fetchJSON(base + "/weather.json" + authQS),
+        fetchJSON(base + "/status.json" + authQS)
+      ]);
+
+      if (!weather && !status) throw new Error("No data at this Firebase path yet");
+
+      els.demoBanner.classList.remove('show');
+      render(weather, status);
+    } catch (err){
+      console.warn("Live data unavailable, showing demo data:", err.message);
+      els.demoBanner.classList.add('show');
+      const d = demoData();
+      render(d.weather, d.status);
+    } finally {
+      setTimeout(() => els.refreshBtn.classList.remove('spin'), 600);
+    }
+  }
+
+  els.refreshBtn.addEventListener('click', load);
+
+  els.overrideBtn.addEventListener('click', () => {
+    const isHidden = els.overridePanel.hidden;
+    els.overridePanel.hidden = !isHidden;
+    els.overrideBtn.setAttribute('aria-expanded', String(isHidden));
+  });
+  document.addEventListener('click', (e) => {
+    if (!els.overrideBtn.contains(e.target) && !els.overridePanel.contains(e.target)){
+      els.overridePanel.hidden = true;
+      els.overrideBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+  els.overrideSelect.addEventListener('change', () => {
+    setOverride(els.overrideSelect.value);
+    renderScript(lastWeather);
+  });
+
+  load();
+  setInterval(load, CONFIG.refreshIntervalMs);
+
+})();
+</script>
+
+</body>
+</html>
