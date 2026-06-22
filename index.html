@@ -465,7 +465,7 @@
     // /status and /weather read rules are public.
     firebaseAuth: "",
     refreshIntervalMs: 10 * 60 * 1000, // 10 minutes
-    staleAfterMs: 20 * 60 * 1000       // warn if data is older than 20 minutes
+    staleAfterMs: 50 * 60 * 1000       // warn if data is older than 20 minutes
   };
 
   document.getElementById('demoUrlHint').textContent = CONFIG.firebaseBaseUrl;
