@@ -622,10 +622,10 @@
   // EDIT ME — these work/rest minute pairs are placeholders. Replace with
   // your encampment's actual approved work/rest cycle for each heat level.
   const ZONE_BREAKS = {
-    GREEN:  { high: { work: 50, break: 10 }, medium: { work: 50, break: 10 }, low: { work: 50, break: 10 } },
-    YELLOW: { high: { work: 40, break: 10 }, medium: { work: 50, break: 10 }, low: { work: 50, break: 10 } },
-    RED:    { high: { work: 30, break: 10 }, medium: { work: 40, break: 10 }, low: { work: 50, break: 10 } },
-    BLACK:  { high: { work: 0,  break: 60 }, medium: { work: 10, break: 50 }, low: { work: 20, break: 40 } }
+    GREEN:  { high: { work: 30, break: 30 }, medium: { work: 50, break: 10 }, low: { work: 50, break: 10 } },
+    YELLOW: { high: { work: 30, break: 30 }, medium: { work: 50, break: 10 }, low: { work: 50, break: 10 } },
+    RED:    { high: { work: 30, break: 10 }, medium: { work: 20, break: 40 }, low: { work: 30, break: 30 } },
+    BLACK:  { high: { work: None,  break: N/A }, medium: { work: None, break: N/A }, low: { work: 20, break: 40 } }
   };
 
   let lastWeather = null;
