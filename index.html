@@ -644,7 +644,7 @@
     const effectiveZone = override || weather.zone || 'UNKNOWN';
     const breaks = ZONE_BREAKS[effectiveZone];
 
-els.scriptTemp.textContent = fmt(weather.feelsLike, 0);
+els.scriptTemp.textContent = fmt(weather.scriptTemp, 0);
     els.scriptZone.textContent = effectiveZone;
 
     if (breaks){
